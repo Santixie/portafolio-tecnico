@@ -1,0 +1,75 @@
+name: Terraform CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  tflint:
+    name: Análisis Estático - TFLint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: Inicializar TFLint
+        run: tflint --init
+        working-directory: ./terraform
+
+      - name: Ejecutar TFLint
+        run: tflint
+        working-directory: ./terraform
+
+  checkov:
+    name: Análisis de Seguridad - Checkov
+    runs-on: ubuntu-latest
+    needs: tflint
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Ejecutar Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: terraform
+          soft_fail: true
+
+  opa-policies:
+    name: Validación Políticas OPA
+    runs-on: ubuntu-latest
+    needs: checkov
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar Conftest
+        run: |
+          wget https://github.com/open-policy-agent/conftest/releases/download/v0.46.0/conftest_0.46.0_Linux_x86_64.tar.gz
+          tar xzf conftest_0.46.0_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin
+
+      - name: Ejecutar políticas OPA sobre código Terraform
+        run: conftest test --policy ../policies/ *.tf
+        working-directory: ./terraform
+
+  terraform-validate:
+    name: Validación Terraform
+    runs-on: ubuntu-latest
+    needs: opa-policies
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init -backend=false
+        working-directory: ./terraform
+
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: ./terraform
